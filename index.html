@@ -238,6 +238,14 @@
         </div>
 
         <div class="form-group">
+            <label>Setup Time</label>
+            <div class="slider-container">
+                <div class="slider-value" id="setupValue">7 seconds</div>
+                <input type="range" id="setupSlider" min="5" max="15" value="7" step="1">
+            </div>
+        </div>
+
+        <div class="form-group">
             <label>Round Duration</label>
             <div class="slider-container">
                 <div class="slider-value" id="durationValue">45 seconds</div>
@@ -273,6 +281,7 @@
     <script>
         // State
         let groupSize = 3;
+        let setupTime = 7;
         let roundDuration = 45;
         let combinations = [];
         let currentComboIndex = 0;
@@ -287,6 +296,8 @@
         // DOM Elements
         const setupScreen = document.getElementById('setupScreen');
         const drillScreen = document.getElementById('drillScreen');
+        const setupSlider = document.getElementById('setupSlider');
+        const setupValue = document.getElementById('setupValue');
         const durationSlider = document.getElementById('durationSlider');
         const durationValue = document.getElementById('durationValue');
         const startBtn = document.getElementById('startBtn');
@@ -306,48 +317,170 @@
             }
         }
 
-        // Generate whistle sound
+        // Generate coach's whistle sound
         function playWhistle() {
             if (!audioContext) return;
 
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
+            const duration = 0.6;
+            const t = audioContext.currentTime;
 
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
+            // Main whistle tone
+            const osc1 = audioContext.createOscillator();
+            const gain1 = audioContext.createGain();
+            osc1.type = 'sine';
+            osc1.frequency.setValueAtTime(3200, t);
+            osc1.frequency.setValueAtTime(3400, t + 0.05);
+            osc1.frequency.setValueAtTime(3200, t + duration);
+            osc1.connect(gain1);
+            gain1.connect(audioContext.destination);
+            gain1.gain.setValueAtTime(0, t);
+            gain1.gain.linearRampToValueAtTime(0.6, t + 0.02);
+            gain1.gain.setValueAtTime(0.6, t + duration - 0.1);
+            gain1.gain.linearRampToValueAtTime(0, t + duration);
+            osc1.start(t);
+            osc1.stop(t + duration);
 
-            oscillator.frequency.setValueAtTime(2800, audioContext.currentTime);
-            oscillator.frequency.exponentialRampToValueAtTime(2400, audioContext.currentTime + 0.5);
+            // Upper harmonic for brightness
+            const osc2 = audioContext.createOscillator();
+            const gain2 = audioContext.createGain();
+            osc2.type = 'sine';
+            osc2.frequency.setValueAtTime(6400, t);
+            osc2.frequency.setValueAtTime(6800, t + 0.05);
+            osc2.frequency.setValueAtTime(6400, t + duration);
+            osc2.connect(gain2);
+            gain2.connect(audioContext.destination);
+            gain2.gain.setValueAtTime(0, t);
+            gain2.gain.linearRampToValueAtTime(0.15, t + 0.02);
+            gain2.gain.setValueAtTime(0.15, t + duration - 0.1);
+            gain2.gain.linearRampToValueAtTime(0, t + duration);
+            osc2.start(t);
+            osc2.stop(t + duration);
 
-            gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
-            oscillator.start(audioContext.currentTime);
-            oscillator.stop(audioContext.currentTime + 0.5);
+            // Noise burst for attack
+            const bufferSize = audioContext.sampleRate * 0.05;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                output[i] = Math.random() * 2 - 1;
+            }
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            const noiseGain = audioContext.createGain();
+            const noiseFilter = audioContext.createBiquadFilter();
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.value = 3200;
+            noiseFilter.Q.value = 2;
+            noise.connect(noiseFilter);
+            noiseFilter.connect(noiseGain);
+            noiseGain.connect(audioContext.destination);
+            noiseGain.gain.setValueAtTime(0.3, t);
+            noiseGain.gain.linearRampToValueAtTime(0, t + 0.05);
+            noise.start(t);
         }
 
-        // Text-to-speech
+        // Get a male voice
+        let maleVoice = null;
+        function loadVoices() {
+            const voices = speechSynthesis.getVoices();
+            // Prefer deeper male voices
+            const preferredVoices = ['Daniel', 'Alex', 'Fred', 'Thomas', 'Gordon', 'Male'];
+            for (const name of preferredVoices) {
+                const found = voices.find(v => v.name.includes(name) && v.lang.startsWith('en'));
+                if (found) {
+                    maleVoice = found;
+                    break;
+                }
+            }
+            // Fallback to any English male voice
+            if (!maleVoice) {
+                maleVoice = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes('male'));
+            }
+            // Final fallback to any English voice
+            if (!maleVoice) {
+                maleVoice = voices.find(v => v.lang.startsWith('en'));
+            }
+        }
+        speechSynthesis.onvoiceschanged = loadVoices;
+        loadVoices();
+
+        // Text-to-speech with male voice
         function speak(text) {
             return new Promise((resolve) => {
                 const utterance = new SpeechSynthesisUtterance(text);
-                utterance.rate = 0.9;
+                if (maleVoice) {
+                    utterance.voice = maleVoice;
+                }
+                utterance.pitch = 0.85;
+                utterance.rate = 1.0;
                 utterance.onend = resolve;
                 utterance.onerror = resolve;
                 speechSynthesis.speak(utterance);
             });
         }
 
-        // Generate all combinations
+        // Generate all combinations with optimized order for rest breaks
         function generateCombinations(size) {
-            const combos = [];
+            // First generate all possible combos
+            const allCombos = [];
             for (let i = 1; i <= size; i++) {
                 for (let j = 1; j <= size; j++) {
                     if (i !== j) {
-                        combos.push({ up: i, down: j });
+                        allCombos.push({ up: i, down: j });
                     }
                 }
             }
-            return combos;
+
+            // Now reorder to maximize rest between rounds for each wrestler
+            const ordered = [];
+            const remaining = [...allCombos];
+            const lastAppearance = new Map();
+
+            for (let round = 0; round < allCombos.length; round++) {
+                // Cycle through who should rest: size, 1, 2, 3, ..., size-1, size, 1, ...
+                const idealResting = ((round + size - 1) % size) + 1;
+
+                let bestIndex = -1;
+                let bestScore = -Infinity;
+
+                // Try to find a combo where the ideal resting wrestler doesn't participate
+                for (let i = 0; i < remaining.length; i++) {
+                    const combo = remaining[i];
+                    if (combo.up !== idealResting && combo.down !== idealResting) {
+                        // Among valid combos, prefer ones where both wrestlers are well-rested
+                        const upRest = round - (lastAppearance.get(combo.up) ?? -1);
+                        const downRest = round - (lastAppearance.get(combo.down) ?? -1);
+                        const score = Math.min(upRest, downRest);
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestIndex = i;
+                        }
+                    }
+                }
+
+                // Fallback if no combo excludes the ideal resting wrestler
+                if (bestIndex === -1) {
+                    for (let i = 0; i < remaining.length; i++) {
+                        const combo = remaining[i];
+                        const upRest = round - (lastAppearance.get(combo.up) ?? -1);
+                        const downRest = round - (lastAppearance.get(combo.down) ?? -1);
+                        const score = Math.min(upRest, downRest);
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestIndex = i;
+                        }
+                    }
+                }
+
+                const chosen = remaining[bestIndex];
+                ordered.push(chosen);
+                remaining.splice(bestIndex, 1);
+                lastAppearance.set(chosen.up, round);
+                lastAppearance.set(chosen.down, round);
+            }
+
+            return ordered;
         }
 
         // Update UI
@@ -393,20 +526,20 @@
             const combo = combinations[currentComboIndex];
             updateDisplay();
 
-            // Phase 1: Announce and setup (7 seconds)
+            // Phase 1: Announce and setup
             currentPhase = 'setup';
             statusText.textContent = 'Get in position...';
             statusText.className = 'status-text status-setup';
 
             await speak(`${combo.up} up, ${combo.down} down`);
-            await countdown(7, 'setup');
+            await countdown(setupTime, 'setup');
 
-            // Phase 2: SET (1 second)
+            // Phase 2: DOWN SET (1 second)
             currentPhase = 'set';
-            statusText.textContent = 'SET!';
+            statusText.textContent = 'DOWN! SET!';
             statusText.className = 'status-text status-set';
 
-            await speak('SET');
+            await speak('Down! Set!');
             await countdown(1, 'ready');
 
             // Whistle to start
@@ -473,6 +606,11 @@
                 option.querySelector('input').checked = true;
                 groupSize = parseInt(option.dataset.value);
             });
+        });
+
+        setupSlider.addEventListener('input', () => {
+            setupTime = parseInt(setupSlider.value);
+            setupValue.textContent = `${setupTime} seconds`;
         });
 
         durationSlider.addEventListener('input', () => {
