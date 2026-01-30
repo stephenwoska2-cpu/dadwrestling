@@ -28,14 +28,64 @@
             text-align: center;
         }
 
-        .setup-screen, .drill-screen {
+        .menu-screen, .setup-screen, .drill-screen {
             width: 100%;
             max-width: 500px;
         }
 
-        .drill-screen {
+        .setup-screen, .drill-screen {
             display: none;
             text-align: center;
+        }
+
+        .menu-screen {
+            text-align: center;
+        }
+
+        .mode-btn {
+            width: 100%;
+            padding: 25px;
+            font-size: 1.4rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 15px;
+            cursor: pointer;
+            margin-bottom: 20px;
+            transition: transform 0.1s, opacity 0.2s;
+        }
+
+        .mode-btn:hover {
+            transform: scale(1.02);
+        }
+
+        .mode-btn:active {
+            transform: scale(0.98);
+        }
+
+        .mode-takedowns {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+            color: white;
+        }
+
+        .mode-updown {
+            background: linear-gradient(135deg, #6c63ff 0%, #5a54d4 100%);
+            color: white;
+        }
+
+        .back-btn {
+            background: transparent;
+            border: 2px solid #3a3a6a;
+            color: #a0a0a0;
+            padding: 12px 24px;
+            font-size: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            margin-bottom: 20px;
+        }
+
+        .back-btn:hover {
+            border-color: #5a5a9a;
+            color: white;
         }
 
         .form-group {
@@ -219,9 +269,17 @@
     </style>
 </head>
 <body>
+    <!-- Main Menu -->
+    <div class="menu-screen" id="menuScreen">
+        <h1>🤼 Wrestling Drill Timer</h1>
+        <button class="mode-btn mode-takedowns" id="takedownsBtn">Takedowns</button>
+        <button class="mode-btn mode-updown" id="updownBtn">Up / Down</button>
+    </div>
+
     <!-- Setup Screen -->
     <div class="setup-screen" id="setupScreen">
-        <h1>🤼 Wrestling Drill Timer</h1>
+        <button class="back-btn" id="backBtn">← Back</button>
+        <h1 id="setupTitle">🤼 Wrestling Drill Timer</h1>
 
         <div class="form-group">
             <label>Number of Wrestlers</label>
@@ -280,6 +338,7 @@
 
     <script>
         // State
+        let drillMode = 'updown'; // 'updown' or 'takedowns'
         let groupSize = 3;
         let setupTime = 7;
         let roundDuration = 45;
@@ -294,8 +353,13 @@
         let audioContext = null;
 
         // DOM Elements
+        const menuScreen = document.getElementById('menuScreen');
         const setupScreen = document.getElementById('setupScreen');
         const drillScreen = document.getElementById('drillScreen');
+        const setupTitle = document.getElementById('setupTitle');
+        const takedownsBtn = document.getElementById('takedownsBtn');
+        const updownBtn = document.getElementById('updownBtn');
+        const backBtn = document.getElementById('backBtn');
         const setupSlider = document.getElementById('setupSlider');
         const setupValue = document.getElementById('setupValue');
         const durationSlider = document.getElementById('durationSlider');
@@ -483,10 +547,17 @@
             return ordered;
         }
 
+        // Number words for speech
+        const numberWords = ['', 'One', 'Two', 'Three', 'Four'];
+
         // Update UI
         function updateDisplay() {
             const combo = combinations[currentComboIndex];
-            comboText.textContent = `${combo.up} up, ${combo.down} down`;
+            if (drillMode === 'takedowns') {
+                comboText.textContent = `${combo.up} vs ${combo.down}`;
+            } else {
+                comboText.textContent = `${combo.up} up, ${combo.down} down`;
+            }
             comboProgress.textContent = `Round ${currentComboIndex + 1} of ${combinations.length}`;
         }
 
@@ -531,15 +602,24 @@
             statusText.textContent = 'Get in position...';
             statusText.className = 'status-text status-setup';
 
-            await speak(`${combo.up} up, ${combo.down} down`);
+            if (drillMode === 'takedowns') {
+                await speak(`${numberWords[combo.up]} versus ${numberWords[combo.down]}`);
+            } else {
+                await speak(`${combo.up} up, ${combo.down} down`);
+            }
             await countdown(setupTime, 'setup');
 
-            // Phase 2: DOWN SET (1 second)
+            // Phase 2: SET (1 second)
             currentPhase = 'set';
-            statusText.textContent = 'DOWN! SET!';
-            statusText.className = 'status-text status-set';
-
-            await speak('Down! Set!');
+            if (drillMode === 'takedowns') {
+                statusText.textContent = 'SET!';
+                statusText.className = 'status-text status-set';
+                await speak('Set!');
+            } else {
+                statusText.textContent = 'DOWN! SET!';
+                statusText.className = 'status-text status-set';
+                await speak('Down! Set!');
+            }
             await countdown(1, 'ready');
 
             // Whistle to start
@@ -595,10 +675,30 @@
             currentComboIndex = combinations.length; // End the loop
 
             drillScreen.style.display = 'none';
+            menuScreen.style.display = 'block';
+        }
+
+        // Show setup screen for selected mode
+        function selectMode(mode) {
+            drillMode = mode;
+            menuScreen.style.display = 'none';
             setupScreen.style.display = 'block';
+            if (mode === 'takedowns') {
+                setupTitle.textContent = '🤼 Takedowns Drill';
+            } else {
+                setupTitle.textContent = '🤼 Up/Down Drill';
+            }
         }
 
         // Event Listeners
+        takedownsBtn.addEventListener('click', () => selectMode('takedowns'));
+        updownBtn.addEventListener('click', () => selectMode('updown'));
+
+        backBtn.addEventListener('click', () => {
+            setupScreen.style.display = 'none';
+            menuScreen.style.display = 'block';
+        });
+
         radioOptions.forEach(option => {
             option.addEventListener('click', () => {
                 radioOptions.forEach(o => o.classList.remove('selected'));
